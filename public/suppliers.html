@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Suppliers - Nordic Dial</title>
+<link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <div class="sidebar" id="sidebar"></div>
+    <div class="main-content">
+      <div class="page-header">
+        <h1>Suppliers</h1>
+        <button class="btn btn-primary" onclick="openModal()">+ Add Supplier</button>
+      </div>
+
+      <div id="supplierGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px">
+        <div class="text-muted">Loading...</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="supplierModal" class="hidden" style="position:fixed;inset:0;background:rgba(4,27,60,0.4);display:flex;align-items:center;justify-content:center;z-index:10">
+    <div class="card" style="width:420px;background:white">
+      <h3 id="modalTitle" style="margin-top:0">Add Supplier</h3>
+      <form id="supplierForm">
+        <input type="hidden" id="supplierId" />
+        <div class="form-group"><label>Company Name</label><input type="text" id="sName" required /></div>
+        <div class="form-group"><label>Contact Person</label><input type="text" id="sContact" /></div>
+        <div class="form-row">
+          <div class="form-group"><label>Phone</label><input type="text" id="sPhone" /></div>
+          <div class="form-group"><label>Email</label><input type="email" id="sEmail" /></div>
+        </div>
+        <div class="form-group"><label>Address</label><textarea id="sAddress" rows="2"></textarea></div>
+        <div class="flex" style="justify-content:flex-end">
+          <button type="button" class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Supplier</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Supplier detail drawer -->
+  <div id="detailModal" class="hidden" style="position:fixed;inset:0;background:rgba(4,27,60,0.4);display:flex;align-items:center;justify-content:center;z-index:10">
+    <div class="card" style="width:520px;background:white;max-height:80vh;overflow:auto" id="detailContent"></div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/auth-guard.js"></script>
+  <script>
+    const session = requireAuth('/suppliers.html');
+    requireManager(session);
+
+    async function loadSuppliers() {
+      const suppliers = await api.get('/suppliers');
+      const grid = document.getElementById('supplierGrid');
+
+      if (!suppliers.length) {
+        grid.innerHTML = '<div class="empty-state">No suppliers yet - add your first one.</div>';
+        return;
+      }
+
+      grid.innerHTML = suppliers.map(s => `
+        <div class="card">
+          <strong style="font-size:16px">${s.name}</strong>
+          <p class="text-muted" style="margin:4px 0">${s.contactPerson || 'No contact person set'}</p>
+          <p style="margin:4px 0;font-size:14px">${s.phone || '—'}</p>
+          <p style="margin:4px 0;font-size:14px">${s.email || '—'}</p>
+          <div class="flex" style="margin-top:12px">
+            <button class="btn btn-secondary" onclick="viewDetail('${s._id}')">Order History</button>
+            <button class="btn btn-ghost" onclick='editSupplier(${JSON.stringify(s).replace(/'/g, "&#39;")})'>Edit</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function viewDetail(id) {
+      const { supplier, products, orderHistory } = await api.get(`/suppliers/${id}`);
+      document.getElementById('detailContent').innerHTML = `
+        <div class="flex-between mb-16">
+          <h3 style="margin:0">${supplier.name}</h3>
+          <button class="btn btn-ghost" onclick="closeDetail()">✕</button>
+        </div>
+        <p><strong>Contact:</strong> ${supplier.contactPerson || '—'} · ${supplier.phone || ''}</p>
+        <p><strong>Email:</strong> ${supplier.email || '—'}</p>
+        <p><strong>Address:</strong> ${supplier.address || '—'}</p>
+
+        <h4>Products Supplied (${products.length})</h4>
+        <table class="mb-16">
+          <thead><tr><th>Product</th><th>SKU</th><th>Stock</th></tr></thead>
+          <tbody>${products.map(p => `<tr><td>${p.name}</td><td>${p.sku}</td><td>${p.quantity}</td></tr>`).join('') || '<tr><td colspan="3" class="text-muted">No products linked yet</td></tr>'}</tbody>
+        </table>
+
+        <h4>Reorder / Order History (${orderHistory.length})</h4>
+        <table>
+          <thead><tr><th>Product</th><th>Qty</th><th>Status</th><th>Date</th></tr></thead>
+          <tbody>${orderHistory.map(o => `<tr><td>${o.productName}</td><td>${o.quantityRequested}</td><td>${o.status}</td><td>${formatDate(o.createdAt)}</td></tr>`).join('') || '<tr><td colspan="4" class="text-muted">No reorders yet</td></tr>'}</tbody>
+        </table>
+      `;
+      document.getElementById('detailModal').classList.remove('hidden');
+    }
+    function closeDetail() { document.getElementById('detailModal').classList.add('hidden'); }
+
+    function openModal() { document.getElementById('supplierModal').classList.remove('hidden'); }
+    function closeModal() {
+      document.getElementById('supplierModal').classList.add('hidden');
+      document.getElementById('supplierForm').reset();
+      document.getElementById('supplierId').value = '';
+      document.getElementById('modalTitle').textContent = 'Add Supplier';
+    }
+
+    function editSupplier(s) {
+      document.getElementById('modalTitle').textContent = 'Edit Supplier';
+      document.getElementById('supplierId').value = s._id;
+      document.getElementById('sName').value = s.name;
+      document.getElementById('sContact').value = s.contactPerson || '';
+      document.getElementById('sPhone').value = s.phone || '';
+      document.getElementById('sEmail').value = s.email || '';
+      document.getElementById('sAddress').value = s.address || '';
+      openModal();
+    }
+
+    document.getElementById('supplierForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('supplierId').value;
+      const payload = {
+        name: document.getElementById('sName').value,
+        contactPerson: document.getElementById('sContact').value,
+        phone: document.getElementById('sPhone').value,
+        email: document.getElementById('sEmail').value,
+        address: document.getElementById('sAddress').value,
+      };
+      try {
+        if (id) await api.put(`/suppliers/${id}`, payload);
+        else await api.post('/suppliers', payload);
+        closeModal();
+        loadSuppliers();
+      } catch (err) {
+        alert(err.message);
+      }
+    });
+
+    loadSuppliers();
+  </script>
+</body>
+</html>

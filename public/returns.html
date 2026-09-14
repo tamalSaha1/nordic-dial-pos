@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Returns & Refunds - Nordic Dial</title>
+<link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <div class="sidebar" id="sidebar"></div>
+    <div class="main-content">
+      <div class="page-header">
+        <h1>Returns & Refunds</h1>
+        <button class="btn btn-primary" onclick="openModal()">+ File a Return</button>
+      </div>
+
+      <div class="card">
+        <table>
+          <thead><tr><th>Invoice #</th><th>Product</th><th>Qty</th><th>Reason</th><th>Refund</th><th>Requested By</th><th>Status</th><th></th></tr></thead>
+          <tbody id="returnsBody"><tr><td colspan="8" class="text-muted">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="returnModal" class="hidden" style="position:fixed;inset:0;background:rgba(4,27,60,0.4);display:flex;align-items:center;justify-content:center;z-index:10">
+    <div class="card" style="width:460px;background:white">
+      <h3 style="margin-top:0">File a Return</h3>
+      <form id="returnForm">
+        <div class="form-group">
+          <label>Invoice Number</label>
+          <input type="text" id="invoiceLookup" placeholder="e.g. INV-20260913-0001" required />
+          <button type="button" class="btn btn-secondary" style="margin-top:8px" onclick="lookupInvoice()">Find Invoice</button>
+        </div>
+        <div id="invoiceItemsBox"></div>
+        <div class="form-group"><label>Quantity to Return</label><input type="number" id="returnQty" min="1" disabled /></div>
+        <div class="form-group"><label>Reason</label><textarea id="returnReason" rows="2" required></textarea></div>
+        <div class="flex" style="justify-content:flex-end">
+          <button type="button" class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="submitReturnBtn" disabled>Submit Return</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/auth-guard.js"></script>
+  <script>
+    const session = requireAuth('/returns.html');
+    const isManager = session.user.role === 'manager';
+    let selectedInvoice = null;
+    let selectedProductId = null;
+
+    async function loadReturns() {
+      const returns = await api.get('/returns');
+      const tbody = document.getElementById('returnsBody');
+
+      if (!returns.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No return requests yet.</td></tr>';
+        return;
+      }
+
+      const statusChip = (s) => {
+        if (s === 'approved') return '<span class="chip chip-success">Approved</span>';
+        if (s === 'rejected') return '<span class="chip chip-error">Rejected</span>';
+        return '<span class="chip chip-neutral">Pending</span>';
+      };
+
+      tbody.innerHTML = returns.map(r => `
+        <tr>
+          <td>${r.invoiceNumber}</td>
+          <td>${r.productName}</td>
+          <td>${r.quantity}</td>
+          <td>${r.reason}</td>
+          <td>${formatMoney(r.refundAmount)}</td>
+          <td>${r.requestedBy ? r.requestedBy.name : '—'}</td>
+          <td>${statusChip(r.status)}</td>
+          <td>
+            ${isManager && r.status === 'pending' ? `
+              <button class="btn btn-secondary" onclick="approve('${r._id}')">Approve</button>
+              <button class="btn btn-ghost" onclick="reject('${r._id}')">Reject</button>
+            ` : ''}
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    async function approve(id) {
+      try { await api.put(`/returns/${id}/approve`, {}); loadReturns(); }
+      catch (err) { alert(err.message); }
+    }
+    async function reject(id) {
+      try { await api.put(`/returns/${id}/reject`, {}); loadReturns(); }
+      catch (err) { alert(err.message); }
+    }
+
+    function openModal() { document.getElementById('returnModal').classList.remove('hidden'); }
+    function closeModal() {
+      document.getElementById('returnModal').classList.add('hidden');
+      document.getElementById('returnForm').reset();
+      document.getElementById('invoiceItemsBox').innerHTML = '';
+      document.getElementById('returnQty').disabled = true;
+      document.getElementById('submitReturnBtn').disabled = true;
+      selectedInvoice = null;
+      selectedProductId = null;
+    }
+
+    async function lookupInvoice() {
+      const number = document.getElementById('invoiceLookup').value.trim();
+      if (!number) return;
+      try {
+        const invoices = await api.get(`/invoices?customer=`); // placeholder, real lookup below
+      } catch {}
+
+      // Search invoices list client-side by invoice number (small dataset assumption for academic project)
+      const allInvoices = await api.get('/invoices');
+      const invoice = allInvoices.find(i => i.invoiceNumber.toLowerCase() === number.toLowerCase());
+
+      if (!invoice) {
+        document.getElementById('invoiceItemsBox').innerHTML = '<div class="text-muted">No invoice found with that number.</div>';
+        return;
+      }
+
+      selectedInvoice = invoice;
+      document.getElementById('invoiceItemsBox').innerHTML = `
+        <div class="form-group">
+          <label>Select Item to Return</label>
+          <select id="itemSelect">
+            ${invoice.items.map(i => `<option value="${i.product}" data-max="${i.quantity}">${i.name} (sold: ${i.quantity})</option>`).join('')}
+          </select>
+        </div>
+      `;
+      const select = document.getElementById('itemSelect');
+      const qtyInput = document.getElementById('returnQty');
+
+      const syncQty = () => {
+        const opt = select.options[select.selectedIndex];
+        qtyInput.max = opt.dataset.max;
+        qtyInput.value = 1;
+        qtyInput.disabled = false;
+        selectedProductId = opt.value;
+        document.getElementById('submitReturnBtn').disabled = false;
+      };
+      select.addEventListener('change', syncQty);
+      syncQty();
+    }
+
+    document.getElementById('returnForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!selectedInvoice || !selectedProductId) return;
+
+      try {
+        await api.post('/returns', {
+          invoiceId: selectedInvoice._id,
+          productId: selectedProductId,
+          quantity: parseInt(document.getElementById('returnQty').value),
+          reason: document.getElementById('returnReason').value,
+        });
+        closeModal();
+        loadReturns();
+      } catch (err) {
+        alert(err.message);
+      }
+    });
+
+    loadReturns();
+  </script>
+</body>
+</html>

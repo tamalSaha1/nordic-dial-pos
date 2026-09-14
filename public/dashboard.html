@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Dashboard - Nordic Dial</title>
+<link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <div class="sidebar" id="sidebar"></div>
+    <div class="main-content">
+      <div class="page-header">
+        <h1>Dashboard</h1>
+        <span class="text-muted" id="todayLabel"></span>
+      </div>
+
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-label">Products</div>
+          <div class="stat-value" id="statProducts">-</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Low Stock Items</div>
+          <div class="stat-value alert" id="statLowStock">-</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Out of Stock</div>
+          <div class="stat-value alert" id="statOutOfStock">-</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Stock Value</div>
+          <div class="stat-value" id="statStockValue">-</div>
+        </div>
+      </div>
+
+      <div id="managerRevenueCard" class="card mb-24 hidden">
+        <div class="flex-between mb-16">
+          <strong>Revenue (Today)</strong>
+          <a href="/reports.html" class="btn btn-secondary">Full Reports →</a>
+        </div>
+        <div class="stat-grid" style="margin-bottom:0">
+          <div class="stat-card">
+            <div class="stat-label">Revenue</div>
+            <div class="stat-value" id="statRevenue">-</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Orders</div>
+            <div class="stat-value" id="statOrders">-</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Avg Order</div>
+            <div class="stat-value" id="statAvgOrder">-</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Pending Returns</div>
+            <div class="stat-value" id="statPendingReturns">-</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="flex-between mb-16">
+          <strong>Recent Reorder Alerts</strong>
+          <span class="text-muted">Auto-generated when stock hits reorder level</span>
+        </div>
+        <table>
+          <thead><tr><th>Product</th><th>Supplier</th><th>Qty Requested</th><th>Status</th><th>Triggered</th></tr></thead>
+          <tbody id="reorderTableBody"><tr><td colspan="5" class="text-muted">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/auth-guard.js"></script>
+  <script>
+    const session = requireAuth('/dashboard.html');
+
+    document.getElementById('todayLabel').textContent = new Date().toLocaleDateString('en-GB', {
+      weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+    });
+
+    async function loadDashboard() {
+      try {
+        const summary = await api.get('/reports/stock-summary');
+        document.getElementById('statProducts').textContent = summary.totalProducts;
+        document.getElementById('statLowStock').textContent = summary.lowStockItems;
+        document.getElementById('statOutOfStock').textContent = summary.outOfStock;
+        document.getElementById('statStockValue').textContent = formatMoney(summary.totalStockValue);
+
+        if (session.user.role === 'manager') {
+          document.getElementById('managerRevenueCard').classList.remove('hidden');
+          const revenue = await api.get('/reports/revenue?period=daily');
+          document.getElementById('statRevenue').textContent = formatMoney(revenue.totalRevenue);
+          document.getElementById('statOrders').textContent = revenue.totalOrders;
+          document.getElementById('statAvgOrder').textContent = formatMoney(revenue.avgOrderValue);
+
+          const pendingReturns = await api.get('/returns?status=pending');
+          document.getElementById('statPendingReturns').textContent = pendingReturns.length;
+        }
+
+        const reorders = await api.get('/reorders');
+        const tbody = document.getElementById('reorderTableBody');
+        if (!reorders.length) {
+          tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No reorder alerts - stock levels are healthy.</td></tr>';
+        } else {
+          tbody.innerHTML = reorders.slice(0, 8).map(r => `
+            <tr>
+              <td>${r.productName}</td>
+              <td>${r.supplierName || '—'}</td>
+              <td>${r.quantityRequested}</td>
+              <td><span class="chip ${r.status === 'fulfilled' ? 'chip-success' : 'chip-error'}">${r.status}</span></td>
+              <td>${formatDate(r.createdAt)}</td>
+            </tr>
+          `).join('');
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    loadDashboard();
+  </script>
+</body>
+</html>

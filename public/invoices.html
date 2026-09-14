@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sales History - Nordic Dial</title>
+<link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <div class="sidebar" id="sidebar"></div>
+    <div class="main-content">
+      <div class="page-header"><h1>Sales History</h1></div>
+
+      <div class="card mb-24">
+        <div class="form-row">
+          <div class="form-group"><label>Date</label><input type="date" id="dateFilter" /></div>
+          <div class="form-group"><label>Customer name</label><input type="text" id="customerFilter" placeholder="Search customer..." /></div>
+          <div class="form-group"><label>Status</label>
+            <select id="statusFilter">
+              <option value="">All</option>
+              <option value="completed">Completed</option>
+              <option value="refunded">Refunded</option>
+              <option value="partially_refunded">Partially Refunded</option>
+            </select>
+          </div>
+          <div class="form-group" style="max-width:120px;display:flex;align-items:flex-end">
+            <button class="btn btn-secondary" onclick="clearFilters()">Clear</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <table>
+          <thead><tr><th>Invoice #</th><th>Date</th><th>Customer</th><th>Items</th><th>Total</th><th>Cashier</th><th>Status</th><th></th></tr></thead>
+          <tbody id="invoiceTableBody"><tr><td colspan="8" class="text-muted">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Invoice detail / print modal -->
+  <div id="invoiceModal" class="hidden" style="position:fixed;inset:0;background:rgba(4,27,60,0.4);display:flex;align-items:center;justify-content:center;z-index:10">
+    <div class="card" style="width:500px;background:white;max-height:80vh;overflow:auto" id="invoiceModalContent"></div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/auth-guard.js"></script>
+  <script>
+    const session = requireAuth('/invoices.html');
+
+    async function loadInvoices() {
+      const params = new URLSearchParams();
+      const date = document.getElementById('dateFilter').value;
+      const customer = document.getElementById('customerFilter').value;
+      const status = document.getElementById('statusFilter').value;
+      if (date) params.set('date', date);
+      if (customer) params.set('customer', customer);
+      if (status) params.set('status', status);
+
+      const invoices = await api.get(`/invoices?${params.toString()}`);
+      const tbody = document.getElementById('invoiceTableBody');
+
+      if (!invoices.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No invoices found.</td></tr>';
+        return;
+      }
+
+      const statusChip = (s) => {
+        if (s === 'completed') return '<span class="chip chip-success">Completed</span>';
+        if (s === 'refunded') return '<span class="chip chip-error">Refunded</span>';
+        return '<span class="chip chip-neutral">Partial Refund</span>';
+      };
+
+      tbody.innerHTML = invoices.map(inv => `
+        <tr>
+          <td>${inv.invoiceNumber}</td>
+          <td>${formatDate(inv.createdAt)}</td>
+          <td>${inv.customerName}</td>
+          <td>${inv.items.length} item(s)</td>
+          <td>${formatMoney(inv.total)}</td>
+          <td>${inv.cashier ? inv.cashier.name : '—'}</td>
+          <td>${statusChip(inv.status)}</td>
+          <td><button class="btn btn-ghost" onclick="viewInvoice('${inv._id}')">View</button></td>
+        </tr>
+      `).join('');
+    }
+
+    async function viewInvoice(id) {
+      const inv = await api.get(`/invoices/${id}`);
+      const content = document.getElementById('invoiceModalContent');
+      content.innerHTML = `
+        <div class="flex-between mb-16">
+          <h3 style="margin:0">${inv.invoiceNumber}</h3>
+          <button class="btn btn-ghost" onclick="closeInvoiceModal()">✕</button>
+        </div>
+        <p class="text-muted">${formatDate(inv.createdAt)} · Cashier: ${inv.cashier ? inv.cashier.name : '—'}</p>
+        <p><strong>Customer:</strong> ${inv.customerName} ${inv.customerPhone ? '· ' + inv.customerPhone : ''}</p>
+        <table class="mb-16">
+          <thead><tr><th>Item</th><th>Qty</th><th>Price</th><th>Subtotal</th></tr></thead>
+          <tbody>
+            ${inv.items.map(i => `<tr><td>${i.name}</td><td>${i.quantity}</td><td>${formatMoney(i.price)}</td><td>${formatMoney(i.subtotal)}</td></tr>`).join('')}
+          </tbody>
+        </table>
+        <div class="flex-between"><span>Subtotal</span><span>${formatMoney(inv.subtotal)}</span></div>
+        <div class="flex-between"><span>Tax</span><span>${formatMoney(inv.tax)}</span></div>
+        <div class="flex-between"><span>Discount</span><span>-${formatMoney(inv.discount)}</span></div>
+        <div class="flex-between" style="font-size:18px;font-weight:700;margin-top:8px"><span>Total</span><span>${formatMoney(inv.total)}</span></div>
+        <a class="btn btn-primary" style="width:100%;text-align:center;margin-top:16px;display:block" href="/invoice-print.html?id=${inv._id}" target="_blank">Print / Export</a>
+      `;
+      document.getElementById('invoiceModal').classList.remove('hidden');
+    }
+
+    function closeInvoiceModal() {
+      document.getElementById('invoiceModal').classList.add('hidden');
+    }
+
+    function clearFilters() {
+      document.getElementById('dateFilter').value = '';
+      document.getElementById('customerFilter').value = '';
+      document.getElementById('statusFilter').value = '';
+      loadInvoices();
+    }
+
+    document.getElementById('dateFilter').addEventListener('change', loadInvoices);
+    document.getElementById('customerFilter').addEventListener('input', debounce(loadInvoices, 300));
+    document.getElementById('statusFilter').addEventListener('change', loadInvoices);
+
+    function debounce(fn, delay) {
+      let t;
+      return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), delay); };
+    }
+
+    loadInvoices();
+  </script>
+</body>
+</html>

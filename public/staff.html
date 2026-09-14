@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Staff Accounts - Nordic Dial</title>
+<link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <div class="sidebar" id="sidebar"></div>
+    <div class="main-content">
+      <div class="page-header">
+        <h1>Staff Accounts</h1>
+        <button class="btn btn-primary" onclick="openModal()">+ Add Staff / Manager</button>
+      </div>
+
+      <div class="card">
+        <table>
+          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Joined</th><th></th></tr></thead>
+          <tbody id="usersBody"><tr><td colspan="6" class="text-muted">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="userModal" class="hidden" style="position:fixed;inset:0;background:rgba(4,27,60,0.4);display:flex;align-items:center;justify-content:center;z-index:10">
+    <div class="card" style="width:420px;background:white">
+      <h3 id="modalTitle" style="margin-top:0">Add Account</h3>
+      <form id="userForm">
+        <input type="hidden" id="userId" />
+        <div class="form-group"><label>Full Name</label><input type="text" id="uName" required /></div>
+        <div class="form-group"><label>Email</label><input type="email" id="uEmail" required /></div>
+        <div class="form-group"><label id="passwordLabel">Password</label><input type="password" id="uPassword" placeholder="Leave blank to keep unchanged (edit mode)" /></div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Role</label>
+            <select id="uRole">
+              <option value="staff">Staff (Cashier)</option>
+              <option value="manager">Manager</option>
+            </select>
+          </div>
+          <div class="form-group" id="statusGroup" style="display:none">
+            <label>Status</label>
+            <select id="uStatus">
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+        </div>
+        <div class="flex" style="justify-content:flex-end">
+          <button type="button" class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/auth-guard.js"></script>
+  <script>
+    const session = requireAuth('/staff.html');
+    requireManager(session);
+
+    async function loadUsers() {
+      const users = await api.get('/users');
+      const tbody = document.getElementById('usersBody');
+
+      tbody.innerHTML = users.map(u => `
+        <tr>
+          <td>${u.name} ${u._id === session.user.id ? '<span class="text-muted">(you)</span>' : ''}</td>
+          <td>${u.email}</td>
+          <td><span class="chip ${u.role === 'manager' ? 'chip-success' : 'chip-neutral'}">${u.role}</span></td>
+          <td><span class="chip ${u.status === 'active' ? 'chip-success' : 'chip-error'}">${u.status}</span></td>
+          <td>${formatDate(u.createdAt)}</td>
+          <td>
+            <button class="btn btn-ghost" onclick='editUser(${JSON.stringify(u).replace(/'/g, "&#39;")})'>Edit</button>
+            ${u._id !== session.user.id ? `<button class="btn btn-ghost" onclick="deleteUser('${u._id}')">Delete</button>` : ''}
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function openModal() { document.getElementById('userModal').classList.remove('hidden'); }
+    function closeModal() {
+      document.getElementById('userModal').classList.add('hidden');
+      document.getElementById('userForm').reset();
+      document.getElementById('userId').value = '';
+      document.getElementById('modalTitle').textContent = 'Add Account';
+      document.getElementById('statusGroup').style.display = 'none';
+      document.getElementById('passwordLabel').textContent = 'Password';
+    }
+
+    function editUser(u) {
+      document.getElementById('modalTitle').textContent = 'Edit Account';
+      document.getElementById('userId').value = u._id;
+      document.getElementById('uName').value = u.name;
+      document.getElementById('uEmail').value = u.email;
+      document.getElementById('uRole').value = u.role;
+      document.getElementById('uStatus').value = u.status;
+      document.getElementById('statusGroup').style.display = 'block';
+      document.getElementById('passwordLabel').textContent = 'New Password (optional)';
+      openModal();
+    }
+
+    async function deleteUser(id) {
+      if (!confirm('Remove this account? This cannot be undone.')) return;
+      try { await api.del(`/users/${id}`); loadUsers(); }
+      catch (err) { alert(err.message); }
+    }
+
+    document.getElementById('userForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('userId').value;
+      const password = document.getElementById('uPassword').value;
+
+      try {
+        if (id) {
+          const payload = {
+            name: document.getElementById('uName').value,
+            role: document.getElementById('uRole').value,
+            status: document.getElementById('uStatus').value,
+          };
+          if (password) payload.password = password;
+          await api.put(`/users/${id}`, payload);
+        } else {
+          if (!password) { alert('Password is required for a new account'); return; }
+          await api.post('/users', {
+            name: document.getElementById('uName').value,
+            email: document.getElementById('uEmail').value,
+            password,
+            role: document.getElementById('uRole').value,
+          });
+        }
+        closeModal();
+        loadUsers();
+      } catch (err) {
+        alert(err.message);
+      }
+    });
+
+    loadUsers();
+  </script>
+</body>
+</html>

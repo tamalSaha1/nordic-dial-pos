@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Print Invoice - Nordic Dial</title>
+<link rel="stylesheet" href="/css/style.css" />
+<style>
+  body { background: white; padding: 40px; }
+  .invoice-sheet { max-width: 700px; margin: 0 auto; }
+  .invoice-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; }
+  .invoice-head h1 { color: var(--primary); margin: 0; }
+  .print-actions { max-width: 700px; margin: 0 auto 16px auto; display: flex; justify-content: flex-end; gap: 8px; }
+  @media print { .print-actions { display: none; } }
+</style>
+</head>
+<body>
+  <div class="print-actions">
+    <button class="btn btn-primary" onclick="window.print()">Print</button>
+  </div>
+
+  <div class="invoice-sheet card" id="invoiceSheet">
+    <div class="text-muted">Loading invoice...</div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/auth-guard.js"></script>
+  <script>
+    // No sidebar on this page (it's meant to be printed/exported), but we still
+    // require a valid session token to fetch the invoice.
+    if (!localStorage.getItem('kl_token')) window.location.href = '/login.html';
+
+    const params = new URLSearchParams(window.location.search);
+    const invoiceId = params.get('id');
+
+    async function loadInvoice() {
+      try {
+        const inv = await api.get(`/invoices/${invoiceId}`);
+        document.getElementById('invoiceSheet').innerHTML = `
+          <div class="invoice-head">
+            <div>
+              <h1>Nordic Dial</h1>
+              <p class="text-muted">Inventory & Billing POS</p>
+            </div>
+            <div style="text-align:right">
+              <strong>${inv.invoiceNumber}</strong><br/>
+              <span class="text-muted">${formatDate(inv.createdAt)}</span>
+            </div>
+          </div>
+          <p><strong>Bill to:</strong> ${inv.customerName} ${inv.customerPhone ? '· ' + inv.customerPhone : ''}</p>
+          <p class="text-muted">Served by: ${inv.cashier ? inv.cashier.name : '—'} · Payment: ${inv.paymentMethod}</p>
+
+          <table class="mb-16">
+            <thead><tr><th>Item</th><th>SKU</th><th>Qty</th><th>Price</th><th>Subtotal</th></tr></thead>
+            <tbody>
+              ${inv.items.map(i => `<tr><td>${i.name}</td><td>${i.sku}</td><td>${i.quantity}</td><td>${formatMoney(i.price)}</td><td>${formatMoney(i.subtotal)}</td></tr>`).join('')}
+            </tbody>
+          </table>
+
+          <div style="max-width:280px;margin-left:auto">
+            <div class="flex-between"><span>Subtotal</span><span>${formatMoney(inv.subtotal)}</span></div>
+            <div class="flex-between"><span>Tax</span><span>${formatMoney(inv.tax)}</span></div>
+            <div class="flex-between"><span>Discount</span><span>-${formatMoney(inv.discount)}</span></div>
+            <div class="flex-between" style="font-size:20px;font-weight:700;border-top:1px solid var(--outline-variant);margin-top:8px;padding-top:8px">
+              <span>Total</span><span>${formatMoney(inv.total)}</span>
+            </div>
+          </div>
+
+          <p class="text-muted" style="margin-top:32px;text-align:center">Thank you for your business!</p>
+        `;
+      } catch (err) {
+        document.getElementById('invoiceSheet').innerHTML = `<div class="empty-state">Could not load invoice: ${err.message}</div>`;
+      }
+    }
+
+    loadInvoice();
+  </script>
+</body>
+</html>

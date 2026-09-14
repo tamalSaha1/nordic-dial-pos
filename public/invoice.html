@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>New Invoice - Nordic Dial</title>
+<link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <div class="sidebar" id="sidebar"></div>
+    <div class="main-content" style="max-width:1400px">
+      <div class="page-header"><h1>New Invoice</h1></div>
+
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:24px;align-items:start">
+        <div class="card">
+          <div class="form-group">
+            <label>Scan or search by SKU / product name</label>
+            <input type="text" id="skuInput" placeholder="Type SKU and press Enter, or search by name..." autofocus />
+          </div>
+          <div id="searchResults" class="mb-16"></div>
+
+          <table>
+            <thead><tr><th>Item</th><th>Price</th><th>Qty</th><th>Subtotal</th><th></th></tr></thead>
+            <tbody id="cartBody"><tr><td colspan="5" class="empty-state">Cart is empty - scan or search a product to begin.</td></tr></tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <div class="form-group"><label>Customer Name (optional)</label><input type="text" id="customerName" placeholder="Walk-in Customer" /></div>
+          <div class="form-group"><label>Customer Phone (optional)</label><input type="text" id="customerPhone" /></div>
+          <div class="form-group"><label>Payment Method</label>
+            <select id="paymentMethod">
+              <option value="cash">Cash</option>
+              <option value="card">Card</option>
+              <option value="mobile_banking">Mobile Banking</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Tax</label><input type="number" id="taxInput" value="0" step="0.01" /></div>
+            <div class="form-group"><label>Discount</label><input type="number" id="discountInput" value="0" step="0.01" /></div>
+          </div>
+
+          <hr style="border:none;border-top:1px solid var(--outline-variant);margin:16px 0" />
+
+          <div class="flex-between mb-16"><span class="text-muted">Subtotal</span><strong id="subtotalDisplay">৳0.00</strong></div>
+          <div class="flex-between mb-16"><span class="text-muted">Total</span><strong style="font-size:22px" id="totalDisplay">৳0.00</strong></div>
+
+          <button class="btn btn-primary" style="width:100%" id="generateBtn" disabled>Generate Invoice</button>
+          <div id="invoiceResult" class="mb-16" style="margin-top:16px"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/auth-guard.js"></script>
+  <script>
+    const session = requireAuth('/invoice.html');
+
+    let cart = []; // { productId, name, sku, price, quantity, availableQty }
+
+    function renderCart() {
+      const tbody = document.getElementById('cartBody');
+      if (!cart.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Cart is empty - scan or search a product to begin.</td></tr>';
+      } else {
+        tbody.innerHTML = cart.map((item, idx) => `
+          <tr>
+            <td>${item.name}<br/><span class="text-muted">${item.sku}</span></td>
+            <td>${formatMoney(item.price)}</td>
+            <td><input type="number" min="1" max="${item.availableQty}" value="${item.quantity}" style="width:70px;height:32px" onchange="updateQty(${idx}, this.value)" /></td>
+            <td>${formatMoney(item.price * item.quantity)}</td>
+            <td><button class="btn btn-ghost" onclick="removeItem(${idx})">Remove</button></td>
+          </tr>
+        `).join('');
+      }
+      updateTotals();
+    }
+
+    function updateQty(idx, value) {
+      const qty = Math.max(1, Math.min(parseInt(value) || 1, cart[idx].availableQty));
+      cart[idx].quantity = qty;
+      renderCart();
+    }
+
+    function removeItem(idx) {
+      cart.splice(idx, 1);
+      renderCart();
+    }
+
+    function updateTotals() {
+      const subtotal = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
+      const tax = parseFloat(document.getElementById('taxInput').value) || 0;
+      const discount = parseFloat(document.getElementById('discountInput').value) || 0;
+      const total = subtotal + tax - discount;
+
+      document.getElementById('subtotalDisplay').textContent = formatMoney(subtotal);
+      document.getElementById('totalDisplay').textContent = formatMoney(total);
+      document.getElementById('generateBtn').disabled = cart.length === 0;
+    }
+
+    document.getElementById('taxInput').addEventListener('input', updateTotals);
+    document.getElementById('discountInput').addEventListener('input', updateTotals);
+
+    function addToCart(product) {
+      const existing = cart.find(i => i.productId === product._id);
+      if (existing) {
+        if (existing.quantity < product.quantity) existing.quantity += 1;
+      } else {
+        cart.push({
+          productId: product._id,
+          name: product.name,
+          sku: product.sku,
+          price: product.price,
+          quantity: 1,
+          availableQty: product.quantity,
+        });
+      }
+      renderCart();
+      document.getElementById('skuInput').value = '';
+      document.getElementById('searchResults').innerHTML = '';
+    }
+
+    const skuInput = document.getElementById('skuInput');
+
+    skuInput.addEventListener('keydown', async (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const code = skuInput.value.trim();
+        if (!code) return;
+        try {
+          const product = await api.get(`/products/lookup/${encodeURIComponent(code)}`);
+          if (product.quantity <= 0) {
+            alert(`${product.name} is out of stock`);
+            return;
+          }
+          addToCart(product);
+        } catch (err) {
+          // Not an exact SKU match - fall back to name search
+          searchByName(code);
+        }
+      }
+    });
+
+    skuInput.addEventListener('input', debounce(() => {
+      const term = skuInput.value.trim();
+      if (term.length >= 2) searchByName(term);
+      else document.getElementById('searchResults').innerHTML = '';
+    }, 300));
+
+    function debounce(fn, delay) {
+      let t;
+      return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), delay); };
+    }
+
+    async function searchByName(term) {
+      const results = await api.get(`/products?search=${encodeURIComponent(term)}`);
+      const box = document.getElementById('searchResults');
+      if (!results.length) {
+        box.innerHTML = '<div class="text-muted">No matching products</div>';
+        return;
+      }
+      box.innerHTML = results.slice(0, 6).map(p => `
+        <div class="flex-between" style="padding:8px 0;border-bottom:1px solid var(--outline-variant);cursor:pointer" onclick='addToCart(${JSON.stringify(p).replace(/'/g, "&#39;")})'>
+          <span>${p.name} <span class="text-muted">(${p.sku})</span></span>
+          <span>${formatMoney(p.price)} · Qty: ${p.quantity}</span>
+        </div>
+      `).join('');
+    }
+
+    document.getElementById('generateBtn').addEventListener('click', async () => {
+      const payload = {
+        customerName: document.getElementById('customerName').value || undefined,
+        customerPhone: document.getElementById('customerPhone').value || undefined,
+        paymentMethod: document.getElementById('paymentMethod').value,
+        tax: parseFloat(document.getElementById('taxInput').value) || 0,
+        discount: parseFloat(document.getElementById('discountInput').value) || 0,
+        items: cart.map(i => ({ productId: i.productId, quantity: i.quantity })),
+      };
+
+      const btn = document.getElementById('generateBtn');
+      btn.disabled = true;
+      btn.textContent = 'Generating...';
+
+      try {
+        const invoice = await api.post('/invoices', payload);
+        document.getElementById('invoiceResult').innerHTML = `
+          <div class="chip chip-success" style="display:block;padding:12px;text-align:center">
+            Invoice ${invoice.invoiceNumber} created!
+          </div>
+          <a class="btn btn-secondary" style="width:100%;margin-top:8px;text-align:center" href="/invoices.html">View in Sales History →</a>
+        `;
+        cart = [];
+        renderCart();
+        document.getElementById('customerName').value = '';
+        document.getElementById('customerPhone').value = '';
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Generate Invoice';
+      }
+    });
+
+    renderCart();
+  </script>
+</body>
+</html>

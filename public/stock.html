@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Stock Tracking - Nordic Dial</title>
+<link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <div class="sidebar" id="sidebar"></div>
+    <div class="main-content">
+      <div class="page-header">
+        <h1>Stock Tracking</h1>
+        <button class="btn btn-primary hidden" id="addProductBtn">+ Add Product</button>
+      </div>
+
+      <div class="card mb-24">
+        <div class="form-row">
+          <div class="form-group">
+            <input type="text" id="searchInput" placeholder="Search by name or SKU..." />
+          </div>
+          <div class="form-group" style="max-width:200px">
+            <select id="categoryFilter"><option value="">All Categories</option></select>
+          </div>
+          <div class="form-group" style="max-width:160px">
+            <label class="flex" style="margin:0"><input type="checkbox" id="lowStockOnly" style="width:auto;height:auto" /> Low stock only</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <table>
+          <thead><tr><th>Product</th><th>SKU</th><th>Category</th><th>Price</th><th>Qty</th><th>Reorder Level</th><th>Supplier</th><th>Status</th><th></th></tr></thead>
+          <tbody id="productTableBody"><tr><td colspan="9" class="text-muted">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add/Edit product modal (manager only) -->
+  <div id="productModal" class="hidden" style="position:fixed;inset:0;background:rgba(4,27,60,0.4);display:flex;align-items:center;justify-content:center;z-index:10">
+    <div class="card" style="width:480px;background:white">
+      <h3 id="modalTitle" style="margin-top:0">Add Product</h3>
+      <form id="productForm">
+        <input type="hidden" id="productId" />
+        <div class="form-group"><label>Name</label><input type="text" id="pName" required /></div>
+        <div class="form-row">
+          <div class="form-group"><label>SKU / Barcode</label><input type="text" id="pSku" required /></div>
+          <div class="form-group"><label>Category</label><input type="text" id="pCategory" required /></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Selling Price</label><input type="number" id="pPrice" step="0.01" required /></div>
+          <div class="form-group"><label>Cost Price</label><input type="number" id="pCostPrice" step="0.01" /></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Quantity</label><input type="number" id="pQuantity" required /></div>
+          <div class="form-group"><label>Reorder Level</label><input type="number" id="pReorderLevel" required /></div>
+        </div>
+        <div class="form-group"><label>Supplier</label><select id="pSupplier"></select></div>
+        <div class="flex" style="justify-content:flex-end;margin-top:8px">
+          <button type="button" class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Product</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/auth-guard.js"></script>
+  <script>
+    const session = requireAuth('/stock.html');
+    const isManager = session.user.role === 'manager';
+    if (isManager) document.getElementById('addProductBtn').classList.remove('hidden');
+
+    let suppliersCache = [];
+
+    async function loadCategories() {
+      const cats = await api.get('/products/categories');
+      const select = document.getElementById('categoryFilter');
+      cats.forEach(c => select.insertAdjacentHTML('beforeend', `<option value="${c}">${c}</option>`));
+    }
+
+    async function loadSuppliers() {
+      suppliersCache = await api.get('/suppliers');
+      const select = document.getElementById('pSupplier');
+      select.innerHTML = '<option value="">No supplier</option>' +
+        suppliersCache.map(s => `<option value="${s._id}">${s.name}</option>`).join('');
+    }
+
+    async function loadProducts() {
+      const search = document.getElementById('searchInput').value;
+      const category = document.getElementById('categoryFilter').value;
+      const lowStock = document.getElementById('lowStockOnly').checked;
+
+      const params = new URLSearchParams();
+      if (search) params.set('search', search);
+      if (category) params.set('category', category);
+      if (lowStock) params.set('lowStock', 'true');
+
+      const products = await api.get(`/products?${params.toString()}`);
+      const tbody = document.getElementById('productTableBody');
+
+      if (!products.length) {
+        tbody.innerHTML = '<tr><td colspan="9" class="empty-state">No products found.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = products.map(p => `
+        <tr>
+          <td>${p.name}</td>
+          <td>${p.sku}</td>
+          <td>${p.category}</td>
+          <td>${formatMoney(p.price)}</td>
+          <td>${p.quantity}</td>
+          <td>${p.reorderLevel}</td>
+          <td>${p.supplier ? p.supplier.name : '—'}</td>
+          <td>${p.isLowStock
+            ? `<span class="chip chip-error">${p.quantity === 0 ? 'Out of stock' : 'Low stock'}</span>`
+            : `<span class="chip chip-success">In stock</span>`}</td>
+          <td>${isManager ? `<button class="btn btn-ghost" onclick='editProduct(${JSON.stringify(p).replace(/'/g, "&#39;")})'>Edit</button>` : ''}</td>
+        </tr>
+      `).join('');
+    }
+
+    document.getElementById('searchInput').addEventListener('input', debounce(loadProducts, 300));
+    document.getElementById('categoryFilter').addEventListener('change', loadProducts);
+    document.getElementById('lowStockOnly').addEventListener('change', loadProducts);
+
+    function debounce(fn, delay) {
+      let t;
+      return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), delay); };
+    }
+
+    // ---- Modal handling (manager only) ----
+    function openModal() { document.getElementById('productModal').classList.remove('hidden'); }
+    function closeModal() {
+      document.getElementById('productModal').classList.add('hidden');
+      document.getElementById('productForm').reset();
+      document.getElementById('productId').value = '';
+      document.getElementById('modalTitle').textContent = 'Add Product';
+    }
+
+    document.getElementById('addProductBtn').addEventListener('click', () => {
+      closeModal();
+      openModal();
+    });
+
+    function editProduct(p) {
+      document.getElementById('modalTitle').textContent = 'Edit Product';
+      document.getElementById('productId').value = p._id;
+      document.getElementById('pName').value = p.name;
+      document.getElementById('pSku').value = p.sku;
+      document.getElementById('pCategory').value = p.category;
+      document.getElementById('pPrice').value = p.price;
+      document.getElementById('pCostPrice').value = p.costPrice;
+      document.getElementById('pQuantity').value = p.quantity;
+      document.getElementById('pReorderLevel').value = p.reorderLevel;
+      document.getElementById('pSupplier').value = p.supplier ? p.supplier._id || p.supplier : '';
+      openModal();
+    }
+
+    document.getElementById('productForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('productId').value;
+      const payload = {
+        name: document.getElementById('pName').value,
+        sku: document.getElementById('pSku').value,
+        category: document.getElementById('pCategory').value,
+        price: parseFloat(document.getElementById('pPrice').value),
+        costPrice: parseFloat(document.getElementById('pCostPrice').value) || 0,
+        quantity: parseInt(document.getElementById('pQuantity').value),
+        reorderLevel: parseInt(document.getElementById('pReorderLevel').value),
+        supplier: document.getElementById('pSupplier').value || undefined,
+      };
+
+      try {
+        if (id) {
+          await api.put(`/products/${id}`, payload);
+        } else {
+          await api.post('/products', payload);
+        }
+        closeModal();
+        loadProducts();
+        loadCategories();
+      } catch (err) {
+        alert(err.message);
+      }
+    });
+
+    loadCategories();
+    if (isManager) loadSuppliers();
+    loadProducts();
+  </script>
+</body>
+</html>
