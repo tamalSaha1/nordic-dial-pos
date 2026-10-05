@@ -25,7 +25,11 @@ const createReturn = async (req, res) => {
     }
 
     const refundAmount = lineItem.price * qty;
-    const photoUrl = `/uploads/returns/${req.file.filename}`;
+    // req.file.buffer holds the raw image bytes (memory storage, not disk) - encode
+    // them as a Base64 data URI so the whole image can be stored as one string field
+    // directly in the Return document and rendered straight into an <img src="...">
+    // on the frontend with no separate file-serving route needed.
+    const photoUrl = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
 
     const returnDoc = await Return.create({
       invoice: invoice._id,

@@ -112,9 +112,9 @@ The seeded data includes a couple of low-stock items (`Leather Strap Watch`, `Sc
 
 ## Return Photo Uploads
 
-When staff or a manager files a return, they must attach a photo of the item (camera capture on mobile, or a file picker on desktop). The photo is saved to `public/uploads/returns/` on the server and shown as a thumbnail in the Returns & Refunds table — click it to view full size. This folder is created automatically on first run and does **not** need to be committed to Git (it's runtime-generated content, similar to `node_modules`).
+When staff or a manager files a return, they must attach a photo of the item (camera capture on mobile, or a file picker on desktop). The photo is **stored directly inside the Return document in MongoDB** as a Base64-encoded string (a `data:image/...;base64,...` URI), not as a separate file on disk. It's capped at 2MB per photo to keep documents reasonably sized.
 
-**Important for deployment (Render free tier):** Render's free web services use an ephemeral filesystem — uploaded photos will be lost whenever the service restarts or redeploys. This is fine for a class demo, but if you need uploaded photos to persist long-term, the standard fix is to upload to a cloud storage service (e.g. Cloudinary's free tier) instead of local disk. Worth mentioning to your teacher as a known limitation/next step if asked.
+**Why this approach:** since the photo lives in your MongoDB Atlas database rather than on the server's local disk, it survives server restarts and redeploys — this sidesteps the problem of Render's free tier wiping local files on every redeploy. The tradeoff (worth knowing for your viva) is that storing binary files as Base64 in a document database isn't the most scalable approach at large volume — a production system would typically use a dedicated file/object storage service (e.g. Cloudinary, AWS S3) and store only a reference URL in MongoDB. For an academic project's scale, storing directly in MongoDB is simpler and perfectly reasonable.
 
 ## Notes for Deployment
 

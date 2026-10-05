@@ -1,21 +1,12 @@
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
 
-// Returned-item photos are stored on disk under public/uploads/returns and served
-// as normal static files (the folder already sits inside the public/ root that
-// server.js serves with express.static).
-const uploadDir = path.join(__dirname, '..', 'public', 'uploads', 'returns');
-fs.mkdirSync(uploadDir, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => {
-    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-    const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, `return-${uniqueSuffix}${ext}`);
-  },
-});
+// Stores the uploaded file in memory (as a Buffer) instead of writing it to disk.
+// We convert that buffer to a Base64 string in the controller and save it straight
+// into the Return document in MongoDB - this means the photo lives in the database
+// itself and survives server restarts/redeploys (unlike local disk storage, which
+// free hosting tiers like Render wipe on every redeploy).
+const storage = multer.memoryStorage();
 
 const fileFilter = (req, file, cb) => {
   const allowed = ['.jpg', '.jpeg', '.png', '.webp'];
@@ -27,7 +18,11 @@ const fileFilter = (req, file, cb) => {
 const uploadReturnPhoto = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max - plenty for a phone photo
+  // Kept small on purpose: the image gets Base64-encoded (~33% larger) and stored
+  // directly inside a MongoDB document, so a smaller cap keeps documents light and
+  // comfortably under MongoDB's 16MB per-document limit and the Atlas free tier's
+  // 512MB total storage limit.
+  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB max
 });
 
 module.exports = { uploadReturnPhoto };
