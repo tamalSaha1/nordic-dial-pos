@@ -10,7 +10,7 @@ A full-stack Point-of-Sale system built with **Node.js + Express + MongoDB** (ba
 - Stock tracking with SKU/barcode-style lookup, categories, and low-stock flags.
 - Invoice generation that auto-totals and **automatically decrements stock**.
 - **Auto-Reorder (wow factor)**: whenever a sale drops a product's stock to or below its reorder level, the system automatically creates a reorder request and simulates notifying the supplier (logged to the server console + visible in the Dashboard/Reports).
-- Returns/refunds that adjust stock and invoice status.
+- Returns/refunds that adjust stock and invoice status, with a **required photo upload** of the returned item's condition so a manager can review what's actually wrong with it before approving a refund.
 - Sales history search by date, customer, and status.
 - Best-selling items report and a daily/weekly/monthly revenue dashboard.
 - Printable/exportable invoice view.
@@ -109,6 +109,12 @@ The seeded data includes a couple of low-stock items (`Leather Strap Watch`, `Sc
 | PUT | `/api/reorders/:id/fulfill` | Manager only |
 | GET | `/api/reports/stock-summary`, `/best-sellers` | Manager + Staff |
 | GET | `/api/reports/revenue` | Manager only |
+
+## Return Photo Uploads
+
+When staff or a manager files a return, they must attach a photo of the item (camera capture on mobile, or a file picker on desktop). The photo is saved to `public/uploads/returns/` on the server and shown as a thumbnail in the Returns & Refunds table — click it to view full size. This folder is created automatically on first run and does **not** need to be committed to Git (it's runtime-generated content, similar to `node_modules`).
+
+**Important for deployment (Render free tier):** Render's free web services use an ephemeral filesystem — uploaded photos will be lost whenever the service restarts or redeploys. This is fine for a class demo, but if you need uploaded photos to persist long-term, the standard fix is to upload to a cloud storage service (e.g. Cloudinary's free tier) instead of local disk. Worth mentioning to your teacher as a known limitation/next step if asked.
 
 ## Notes for Deployment
 

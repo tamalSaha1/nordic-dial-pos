@@ -33,6 +33,12 @@ app.get('*', (req, res, next) => {
 // Basic error handler
 app.use((err, req, res, next) => {
   console.error(err.stack);
+
+  // multer throws for bad file type / oversized file - surface these as 400s, not 500s
+  if (err.name === 'MulterError' || /image/i.test(err.message || '')) {
+    return res.status(400).json({ message: err.message });
+  }
+
   res.status(500).json({ message: 'Something went wrong on the server', error: err.message });
 });
 

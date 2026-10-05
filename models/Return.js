@@ -8,6 +8,7 @@ const returnSchema = new mongoose.Schema(
     productName: { type: String, required: true },
     quantity: { type: Number, required: true, min: 1 },
     reason: { type: String, required: true, trim: true },
+    photoUrl: { type: String, required: true }, // path to the uploaded photo of the returned item's condition
     refundAmount: { type: Number, required: true, min: 0 },
     status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
     requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },

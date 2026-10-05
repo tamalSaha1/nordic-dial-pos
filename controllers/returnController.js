@@ -3,9 +3,16 @@ const Invoice = require('../models/Invoice');
 const Product = require('../models/Product');
 
 // @route  POST /api/returns   - staff or manager can file a return request
+// Expects multipart/form-data (the "uploadReturnPhoto" middleware runs first and
+// populates req.file with the uploaded condition photo).
 const createReturn = async (req, res) => {
   try {
     const { invoiceId, productId, quantity, reason } = req.body;
+    const qty = Number(quantity);
+
+    if (!req.file) {
+      return res.status(400).json({ message: 'A photo of the returned item is required so a manager can review its condition' });
+    }
 
     const invoice = await Invoice.findById(invoiceId);
     if (!invoice) return res.status(404).json({ message: 'Invoice not found' });
@@ -13,19 +20,21 @@ const createReturn = async (req, res) => {
     const lineItem = invoice.items.find((i) => String(i.product) === String(productId));
     if (!lineItem) return res.status(400).json({ message: 'That product was not part of this invoice' });
 
-    if (quantity > lineItem.quantity) {
+    if (qty > lineItem.quantity) {
       return res.status(400).json({ message: 'Return quantity exceeds quantity originally sold' });
     }
 
-    const refundAmount = lineItem.price * quantity;
+    const refundAmount = lineItem.price * qty;
+    const photoUrl = `/uploads/returns/${req.file.filename}`;
 
     const returnDoc = await Return.create({
       invoice: invoice._id,
       invoiceNumber: invoice.invoiceNumber,
       product: productId,
       productName: lineItem.name,
-      quantity,
+      quantity: qty,
       reason,
+      photoUrl,
       refundAmount,
       requestedBy: req.user._id,
       status: req.user.role === 'manager' ? 'approved' : 'pending', // managers can self-approve

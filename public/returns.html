@@ -17,8 +17,8 @@
 
       <div class="card">
         <table>
-          <thead><tr><th>Invoice #</th><th>Product</th><th>Qty</th><th>Reason</th><th>Refund</th><th>Requested By</th><th>Status</th><th></th></tr></thead>
-          <tbody id="returnsBody"><tr><td colspan="8" class="text-muted">Loading...</td></tr></tbody>
+          <thead><tr><th>Invoice #</th><th>Product</th><th>Qty</th><th>Reason</th><th>Photo</th><th>Refund</th><th>Requested By</th><th>Status</th><th></th></tr></thead>
+          <tbody id="returnsBody"><tr><td colspan="9" class="text-muted">Loading...</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -36,6 +36,12 @@
         <div id="invoiceItemsBox"></div>
         <div class="form-group"><label>Quantity to Return</label><input type="number" id="returnQty" min="1" disabled /></div>
         <div class="form-group"><label>Reason</label><textarea id="returnReason" rows="2" required></textarea></div>
+        <div class="form-group">
+          <label>Photo of the Returned Item (required)</label>
+          <input type="file" id="returnPhoto" accept="image/png, image/jpeg, image/webp" capture="environment" required />
+          <div class="text-muted" style="margin-top:4px">Take or upload a clear photo showing the item's condition - this is what a manager will review.</div>
+          <img id="photoPreview" class="hidden" style="margin-top:10px;max-width:100%;max-height:180px;border-radius:var(--radius-sm);border:1px solid var(--outline-variant)" />
+        </div>
         <div class="flex" style="justify-content:flex-end">
           <button type="button" class="btn btn-ghost" onclick="closeModal()">Cancel</button>
           <button type="submit" class="btn btn-primary" id="submitReturnBtn" disabled>Submit Return</button>
@@ -57,7 +63,7 @@
       const tbody = document.getElementById('returnsBody');
 
       if (!returns.length) {
-        tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No return requests yet.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="empty-state">No return requests yet.</td></tr>';
         return;
       }
 
@@ -73,6 +79,9 @@
           <td>${r.productName}</td>
           <td>${r.quantity}</td>
           <td>${r.reason}</td>
+          <td>${r.photoUrl
+            ? `<a href="${r.photoUrl}" target="_blank"><img src="${r.photoUrl}" alt="Returned item photo" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--outline-variant)" /></a>`
+            : '<span class="text-muted">—</span>'}</td>
           <td>${formatMoney(r.refundAmount)}</td>
           <td>${r.requestedBy ? r.requestedBy.name : '—'}</td>
           <td>${statusChip(r.status)}</td>
@@ -102,9 +111,19 @@
       document.getElementById('invoiceItemsBox').innerHTML = '';
       document.getElementById('returnQty').disabled = true;
       document.getElementById('submitReturnBtn').disabled = true;
+      document.getElementById('photoPreview').classList.add('hidden');
+      document.getElementById('photoPreview').src = '';
       selectedInvoice = null;
       selectedProductId = null;
     }
+
+    document.getElementById('returnPhoto').addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      const preview = document.getElementById('photoPreview');
+      if (!file) { preview.classList.add('hidden'); return; }
+      preview.src = URL.createObjectURL(file);
+      preview.classList.remove('hidden');
+    });
 
     async function lookupInvoice() {
       const number = document.getElementById('invoiceLookup').value.trim();
@@ -150,17 +169,42 @@
       e.preventDefault();
       if (!selectedInvoice || !selectedProductId) return;
 
+      const photoFile = document.getElementById('returnPhoto').files[0];
+      if (!photoFile) {
+        alert('Please attach a photo of the returned item before submitting.');
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('invoiceId', selectedInvoice._id);
+      formData.append('productId', selectedProductId);
+      formData.append('quantity', document.getElementById('returnQty').value);
+      formData.append('reason', document.getElementById('returnReason').value);
+      formData.append('photo', photoFile);
+
+      const submitBtn = document.getElementById('submitReturnBtn');
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Submitting...';
+
       try {
-        await api.post('/returns', {
-          invoiceId: selectedInvoice._id,
-          productId: selectedProductId,
-          quantity: parseInt(document.getElementById('returnQty').value),
-          reason: document.getElementById('returnReason').value,
+        // Uses fetch directly (not the api.js helper) because file uploads must be
+        // sent as multipart/form-data, not JSON - so we skip the JSON content-type header
+        // and let the browser set the correct multipart boundary automatically.
+        const res = await fetch('/api/returns', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${localStorage.getItem('kl_token')}` },
+          body: formData,
         });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Could not submit return');
+
         closeModal();
         loadReturns();
       } catch (err) {
         alert(err.message);
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Submit Return';
       }
     });
 
